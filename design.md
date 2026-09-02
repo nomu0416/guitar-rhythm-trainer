@@ -44,6 +44,7 @@ src/
     pitch/             YIN法の実装(worklet からも単体テストからも呼べる形にする)
   chart/
     parser/            alphaTab の解析結果 -> 内部 Chart 型への変換
+  playback/            alphaSynth によるBGM再生・再生速度制御、ゲームクロックの提供
   difficulty/          難易度プリセット定義、詳細設定のバリデーション
   storage/             localStorage 経由のスコア/設定の読み書き
   types/               画面を横断する共有型定義
@@ -51,6 +52,49 @@ src/
 
 「TAB譜パース」「音声解析」「判定エンジン」「描画」「永続化」を別モジュールに分離し、
 それぞれ単体でテストできる形にする(判定エンジンは音声もCanvasも知らなくてよい設計にする)。
+
+### 2.1 モジュール依存関係図
+
+矢印は「利用する」方向。`game/engine`(判定エンジン)は `audio` や `game/render` を直接知らず、
+プレーンなデータ(検出ピッチ・ゲームクロック・Chart)だけを受け取る形に閉じている。
+
+```mermaid
+flowchart TD
+  subgraph Screens["screens/"]
+    SongSelect["SongSelect"]
+    Calibration["Calibration"]
+    Play["Play"]
+    Result["Result"]
+  end
+
+  ChartParser["chart/parser<br/>(alphaTab解析 -> Chart)"]
+  Playback["playback<br/>(alphaSynth再生・速度制御・ゲームクロック)"]
+  AudioInput["audio/input<br/>(getUserMedia)"]
+  AudioWorklet["audio/worklet + audio/pitch<br/>(YIN法によるピッチ検出)"]
+  Engine["game/engine<br/>(判定エンジン・スコア計算)"]
+  Render["game/render<br/>(Canvas描画)"]
+  Difficulty["difficulty<br/>(判定ウィンドウ定義)"]
+  Storage["storage<br/>(スコア/設定の永続化)"]
+
+  SongSelect --> ChartParser
+  Calibration --> AudioInput
+  Calibration --> Difficulty
+  Calibration --> Playback
+  ChartParser --> Playback
+
+  Play --> Render
+  Play --> Engine
+
+  ChartParser -- "Chart(Note[])" --> Engine
+  Playback -- "ゲームクロック" --> Engine
+  Playback -- "ゲームクロック" --> Render
+  AudioInput --> AudioWorklet
+  AudioWorklet -- "検出ピッチ" --> Engine
+  Difficulty -- "判定ウィンドウ" --> Engine
+  Engine -- "ノーツ位置・判定結果" --> Render
+  Engine -- "ScoreRecord" --> Storage
+  Storage -- "自己ベスト" --> Result
+```
 
 ## 3. データモデル
 
@@ -263,6 +307,29 @@ function judgementCoefficient(rank: JudgementRank): number {
 React側に単純な状態マシン(`type Screen = 'title' | 'songSelect' | 'calibration' | 'play' | 'result'`)
 を持ち、4章の遷移図通りに画面を切り替える。プレイ画面に入る際にCanvas描画ループを開始し、
 リザルト画面に遷移すると同時に停止・破棄する(常時Canvasを回さない)。
+
+### 11.1 状態遷移図
+
+```mermaid
+stateDiagram-v2
+  [*] --> Title
+
+  Title --> SongSelect: はじめる
+
+  SongSelect --> Calibration: 曲を選択
+
+  Calibration --> Play: プレイ開始
+
+  Play --> Result: 曲終了 / 途中終了
+
+  Result --> Play: もう一度プレイ(同じ曲・難易度・速度)
+  Result --> SongSelect: 譜面選択に戻る
+```
+
+- `Play` に入る条件は必ず `Calibration` を経由すること(判定プリセット・再生速度は
+  キャリブレーション画面で確定させてからプレイ画面に渡す。spec.md 4.3節)
+- `Result` から `Play` へ直接戻る「もう一度プレイ」は、直前と同じ曲・難易度・速度設定を
+  引き継ぐ(キャリブレーション画面を再度経由しない)
 
 ## 12. v1で作らないもの
 
