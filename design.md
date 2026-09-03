@@ -36,16 +36,16 @@ src/
     Play/              Canvas描画はこの配下に閉じ込める
     Result/
   game/
-    engine/            判定エンジン、スコア計算、ゲームクロック
+    engine/            判定エンジン、スコア計算
     render/            レーン・ノーツのCanvas描画
+    difficulty/        難易度プリセット定義、詳細設定のバリデーション(判定エンジンが参照するルール)
   audio/
-    input/             getUserMedia まわりのラッパー
+    input/             getUserMedia まわりのラッパー(マイク入力)
     worklet/           AudioWorkletProcessor(ピッチ検出をオーディオスレッドで実行)
     pitch/             YIN法の実装(worklet からも単体テストからも呼べる形にする)
+    playback/          alphaSynth によるBGM再生・再生速度制御、ゲームクロックの提供(音声出力)
   chart/
     parser/            alphaTab の解析結果 -> 内部 Chart 型への変換
-  playback/            alphaSynth によるBGM再生・再生速度制御、ゲームクロックの提供
-  difficulty/          難易度プリセット定義、詳細設定のバリデーション
   storage/             localStorage 経由のスコア/設定の読み書き
   types/               画面を横断する共有型定義
 ```
@@ -68,12 +68,12 @@ flowchart TD
   end
 
   ChartParser["chart/parser<br/>(alphaTab解析 -> Chart)"]
-  Playback["playback<br/>(alphaSynth再生・速度制御・ゲームクロック)"]
+  Playback["audio/playback<br/>(alphaSynth再生・速度制御・ゲームクロック)"]
   AudioInput["audio/input<br/>(getUserMedia)"]
   AudioWorklet["audio/worklet + audio/pitch<br/>(YIN法によるピッチ検出)"]
   Engine["game/engine<br/>(判定エンジン・スコア計算)"]
   Render["game/render<br/>(Canvas描画)"]
-  Difficulty["difficulty<br/>(判定ウィンドウ定義)"]
+  Difficulty["game/difficulty<br/>(判定ウィンドウ定義)"]
   Storage["storage<br/>(スコア/設定の永続化)"]
 
   SongSelect --> ChartParser
@@ -122,7 +122,7 @@ interface Chart {
   sourceFormat: 'gp3' | 'gp4' | 'gp5' | 'gpx' | 'gp' | 'musicxml' | 'alphatex';
 }
 
-// difficulty/types.ts
+// game/difficulty/types.ts
 type DifficultyPresetId = 'very-loose' | 'loose' | 'standard' | 'strict' | 'very-strict' | 'custom';
 
 interface JudgementWindow {
@@ -148,7 +148,7 @@ interface JudgementResult {
   pitchErrorCents: number | null; // 無音などでピッチ未検出の場合は null
 }
 
-// playback/types.ts
+// audio/playback/types.ts
 type PlaybackSpeedPercent = number; // 50-100 の整数(50%〜100%、5%刻みに丸めて記録する。spec.md 6章/10章)
 
 // storage/types.ts
@@ -272,7 +272,7 @@ function judgementCoefficient(rank: JudgementRank): number {
 - `consecutivePerfect` は Perfect が連続した回数。Good/Miss を挟んだ時点で0にリセットする
   (spec.md 9章「コンボ倍率」の定義通り)
 - 合計は四捨五入して `bestScore` と比較する
-- ランク(S/A/B/C…)の閾値は spec.md 9章の通り未確定のため、`difficulty/rankTable.ts` に
+- ランク(S/A/B/C…)の閾値は spec.md 9章の通り未確定のため、`game/difficulty/rankTable.ts` に
   設定値としてまとめ、後から調整しやすくする
 
 ## 9. 描画(プレイ画面)
