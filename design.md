@@ -24,6 +24,12 @@
 サーバーは一切持たない。ビルド成果物は静的ファイル一式となり、ブラウザで直接開くか
 任意の静的ホスティングに置くだけで動作する(spec.md 2章「サーバー不要」)。
 
+> **実装セッション1で判明**: Viteでのビルドには公式プラグイン `@coderline/alphatab-vite`
+> が必須(alphaTabのWorker/AudioWorkletエントリをViteのバンドラが見失う既知の問題への対応)。
+> `npm run dev`/`build` のたびに `public/font`(記譜フォント)・`public/soundfont`(BGM再生用
+> SoundFont2)を node_modules から自動コピーするため、これらはリポジトリにコミットせず
+> `.gitignore` している。
+
 ## 2. ディレクトリ構成(案)
 
 ```
@@ -196,12 +202,22 @@ alphaTabの解析結果を判定エンジンが扱いやすい形に写した**�
 5. 変換結果を `Chart` としてメモリ上に保持する。元ファイルはBase64化し、`fretrush:charts`
    (10章)にメタデータと合わせて保存して次回起動時に再インポート不要にする
 
+> **実装セッション1で判明**: alphaTabの `Note.string` は「1が最も低い弦(TAB譜の一番下の線)」
+> という採番で、本書の `StringNumber`(1が最も高い弦 = TAB譜の一番上の線)とは逆になっている
+> (`Staff.tuning` は逆に「配列の先頭が一番上の線」なので、こちらは本書の並びと一致する)。
+> `chart/parser/fromAlphaTabScore.ts` で `stringCount + 1 - alphaTabString` として明示的に
+> 反転させ、実サンプルファイルでの変換結果を統合テストで検証済み。
+
 ## 5. BGM再生・再生速度制御
 
 *(対応: spec.md 6章 BGM再生・再生速度仕様)*
 
-- TAB譜取り込み時(4章)に得た `alphaTab` の `Score` オブジェクトを、そのまま `alphaSynth` に
-  渡して再生する。曲ごとの音声ファイルは持たない(spec.md 5〜6章)
+- TAB譜取り込み時(4章)に得た `alphaTab` の `Score` オブジェクトから再生する。曲ごとの
+  音声ファイルは持たない(spec.md 5〜6章)。
+  > **実装セッション1で判明**: `Score` を `alphaSynth` へ直接渡すAPIは無い。実際は
+  > `Score → MidiFileGenerator → MidiFile → AlphaSynth.loadMidiFile()` という経路になり、
+  > 別途SoundFont2(4章の通り `public/soundfont` に自動配置される)の読み込みも必要。
+  > 次回のBGM実装セッションで、本節をこの実際の経路に沿って書き直す。
 - 再生速度はキャリブレーション画面(spec.md 4.3節)で選んだ 50%〜100% の値を `alphaSynth` の
   再生速度パラメータに適用する。alphaSynthはテンポ(BPM相当)をスケールして再生するため、
   ピッチは変化しない(spec.md 6章)
