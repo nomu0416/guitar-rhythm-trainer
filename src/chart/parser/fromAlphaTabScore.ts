@@ -9,6 +9,16 @@ export class ChartImportError extends Error {}
 export interface ImportResult {
   chart: Chart
   warnings: string[]
+  /** BGM再生用(design.md 5章)。tick->ms変換のために生成済みのMidiFileをそのまま再利用する */
+  midiFile: alphaTab.midi.MidiFile
+  /**
+   * BGM再生中のゲームクロック計算用(audio/playback/alphaSynthClock.ts)。
+   * alphaSynthの`timePosition`は再生速度に関わらず実時間(壁時計)で進むため、
+   * 元テンポ基準のtick位置(`synth.tickPosition`)をこの区間情報でms変換して
+   * `Chart.notes[].timeMs`と同じ基準に揃える必要がある。
+   */
+  tempoSegments: TempoSegment[]
+  ticksPerQuarter: number
 }
 
 // 標準EADGBEの開放弦MIDIノート番号。alphaTabの Staff.tuning と同じ並び(先頭が1弦=最上段)
@@ -51,7 +61,7 @@ function toStringNumber(alphaTabString: number, stringCount: number): StringNumb
 function extractTempoSegments(
   score: alphaTab.model.Score,
   settings: alphaTab.Settings,
-): { segments: TempoSegment[]; ticksPerQuarter: number } {
+): { segments: TempoSegment[]; ticksPerQuarter: number; midiFile: alphaTab.midi.MidiFile } {
   const midiFile = new alphaTab.midi.MidiFile()
   const handler = new alphaTab.midi.AlphaSynthMidiFileHandler(midiFile)
   const generator = new alphaTab.midi.MidiFileGenerator(score, settings, handler)
@@ -70,7 +80,7 @@ function extractTempoSegments(
     segments.push({ startTick: 0, bpm: score.tempo })
   }
 
-  return { segments, ticksPerQuarter: midiFile.division }
+  return { segments, ticksPerQuarter: midiFile.division, midiFile }
 }
 
 export function convertScoreToChart(
@@ -90,7 +100,7 @@ export function convertScoreToChart(
   const { staff } = found
   const stringCount = staff.tuning.length
 
-  const { segments, ticksPerQuarter } = extractTempoSegments(score, settings)
+  const { segments, ticksPerQuarter, midiFile } = extractTempoSegments(score, settings)
 
   const notes: Note[] = []
   let noteIndex = 0
@@ -128,7 +138,7 @@ export function convertScoreToChart(
     sourceFormat,
   }
 
-  return { chart, warnings }
+  return { chart, warnings, midiFile, tempoSegments: segments, ticksPerQuarter }
 }
 
 /** ファイル拡張子から Chart.sourceFormat を推測する */

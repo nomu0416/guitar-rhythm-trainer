@@ -131,6 +131,19 @@ interface Chart {
   sourceFormat: 'gp3' | 'gp4' | 'gp5' | 'gpx' | 'gp' | 'musicxml' | 'alphatex';
 }
 
+// types/song.ts — 画面横断で使う「選択中の曲」(実装セッション2で追加)
+interface TempoSegment {
+  startTick: number;
+  bpm: number;
+}
+
+interface Song {
+  chart: Chart;               // レーン描画・判定用
+  midiFile: alphaTab.midi.MidiFile; // BGM再生用(5章)。Chartと同じScoreから生成
+  tempoSegments: TempoSegment[];    // GameClockのtick->ms変換用(5.2節)
+  ticksPerQuarter: number;
+}
+
 // game/difficulty/types.ts
 type DifficultyPresetId = 'very-loose' | 'loose' | 'standard' | 'strict' | 'very-strict' | 'custom';
 
@@ -210,23 +223,77 @@ alphaTabの解析結果を判定エンジンが扱いやすい形に写した**�
 
 ## 5. BGM再生・再生速度制御
 
-*(対応: spec.md 6章 BGM再生・再生速度仕様)*
+*(対応: spec.md 6章 BGM再生・再生速度仕様。実装セッション2で確定)*
 
-- TAB譜取り込み時(4章)に得た `alphaTab` の `Score` オブジェクトから再生する。曲ごとの
-  音声ファイルは持たない(spec.md 5〜6章)。
-  > **実装セッション1で判明**: `Score` を `alphaSynth` へ直接渡すAPIは無い。実際は
-  > `Score → MidiFileGenerator → MidiFile → AlphaSynth.loadMidiFile()` という経路になり、
-  > 別途SoundFont2(4章の通り `public/soundfont` に自動配置される)の読み込みも必要。
-  > 次回のBGM実装セッションで、本節をこの実際の経路に沿って書き直す。
-- 再生速度はキャリブレーション画面(spec.md 4.3節)で選んだ 50%〜100% の値を `alphaSynth` の
-  再生速度パラメータに適用する。alphaSynthはテンポ(BPM相当)をスケールして再生するため、
-  ピッチは変化しない(spec.md 6章)
-- **ゲームクロックは `alphaSynth` の再生位置を基準にする。** BGM再生を導入する以上、判定エンジン
-  (7章)・描画(9章)ともにこの時刻を単一の真実源として参照し、ズレが生じないようにする
-  (v1では独自のタイマーとBGM再生位置を別々に進行させない)
-- ノーツの `timeMs`(4章の`Chart`)はBGMと同じ `Score` から生成しているため、速度を変えても
-  BGMとノーツの相対タイミングは自動的に一致する。速度倍率をノーツ側に別途掛け合わせる処理は
-  不要(alphaSynthの再生位置がそのまま「スケール後の経過時間」になるため)
+### 5.1 AlphaSynthの取得方法
+
+`AlphaSynthWebWorkerApi`(Worker+AudioWorkletの手動組み立てが必要)を自前で構築する案も
+検討したが、その組み立てに使う内部API(`BrowserUiFacade.createAlphaSynthWebWorker()`等)は
+**型定義に一切現れない完全非公開のAPI**であることが判明し、alphaTabのパッチアップデートで
+無警告に壊れるリスクが高いため不採用とした。
+
+代わりに、**公式ファサード`AlphaTabApi`を、画面に表示しない`<div>`要素に紐付けて生成し、
+記譜レンダリングは一切呼ばず(`load()`/`renderScore()`等を呼ばない)、`api.player`
+(`IAlphaSynth`、型公開されている公式インターフェース)だけを操作する**方式を採用した
+(`audio/playback/alphaSynthPlayer.ts`)。プロジェクトが導入済みの`@coderline/alphatab-vite`
+プラグインは、まさにこの`AlphaTabApi`が使うWorker/AudioWorklet配線をViteでビルド可能に
+するためのものであることもソースコード上で確認できた。
+
+```ts
+const settings = new alphaTab.Settings()
+settings.player.playerMode = alphaTab.PlayerMode.EnabledSynthesizer
+settings.player.enableCursor = false
+settings.core.fontDirectory = '/font/' // Vite dev環境でのフォント自動検出誤りを回避
+
+const container = document.createElement('div')
+container.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;'
+document.body.appendChild(container)
+const api = new alphaTab.AlphaTabApi(container, settings)
+const synth = api.player! // コンストラクタ完了時点で同期的に非null
+api.loadSoundFontFromUrl('/soundfont/sonivox.sf2', false)
+synth.playbackSpeed = /* 0.5-1.0 */
+synth.loadMidiFile(midiFile) // 4章の通り、TAB譜取り込み時に生成済みのMidiFileをそのまま使う
+synth.readyForPlayback.on(() => synth.play())
+```
+
+既知の制限: `api.score`を一度も設定しなくても、`AlphaTabApi`はコンストラクタ内で記譜
+レンダリング用のリソース(Bravuraフォント)読み込みを試みる。`fontDirectory`を明示しても
+Vite dev環境では一部リクエストが誤ったパス(`node_modules/.vite/deps/...`)へ飛び、
+コンソールに`[AlphaTab][Font] Loading Failed`エラーが出る。**プレイヤー機能(音の再生)には
+影響しないことを確認済み**(BGM再生・速度変更・ノーツ同期はいずれも正常動作)だが、
+見た目上のノイズとして残っている。回避策(記譜レンダリングを完全に無効化する公式オプション)
+は本バージョンのalphaTabには見当たらなかった。
+
+### 5.2 ゲームクロック: `timePosition` ではなく `tickPosition` を使う
+
+**実装セッション2で判明した最重要事項**。`IAlphaSynth.timePosition`(および
+`currentPosition.currentTime`)は、実装ソース(`AlphaSynthBase`)を確認したところ
+**再生速度に関わらず実時間(壁時計)で1:1に進む値**であり、「速度を落とすとゆっくり進む
+時刻」ではなかった(design.mdの旧版はここを誤って想定していた)。実際に速度でスケールされる
+のは `tickPosition`(曲の中の絶対位置、tick単位)の方で、`playbackSpeed`を変えると
+実時間に対する`tickPosition`の進み方が変わる。
+
+そのため、GameClockは `synth.tickPosition` を、TAB譜取り込み時(4章)に得たテンポ区間情報
+(`TempoSegment[]`, `ticksPerQuarter`)で `ticksToMs()` 変換した値を使う
+(`audio/playback/alphaSynthClock.ts`)。これで `Chart.notes[].timeMs`(元テンポ基準のms)と
+同じ基準に揃い、速度を落とすと実時間に対してノーツもBGMと同じだけゆっくり流れるようになる。
+
+```ts
+function createAlphaSynthClock(synth, tempoSegments, ticksPerQuarter): GameClock {
+  return { nowMs: () => ticksToMs(synth.tickPosition, tempoSegments, ticksPerQuarter) }
+}
+```
+
+この経緯により、`TempoSegment[]`と`ticksPerQuarter`は`ImportResult`(5章)経由で
+画面間を持ち回る`Song`型(`types/song.ts`)に含めている。
+
+### 5.3 その他
+
+- 再生速度はキャリブレーション画面(spec.md 4.3節)で選んだ50%〜100%の値を、そのまま
+  `synth.playbackSpeed`(0.125〜8.0、50-100%は0.5-1.0にマッピング)へ設定する。alphaSynthは
+  テンポをスケールして再生するため、ピッチは変化しない(spec.md 6章)
+- ノーツの`timeMs`(4章の`Chart`)とBGMは同じ`Score`(→`MidiFile`)から生成しているため、
+  5.2のGameClockを介せば速度を変えてもBGMとノーツの相対タイミングは自動的に一致する
 - 曲の再生中に速度を変更する操作はv1では提供しない(spec.md 6章「プレイ中の曲を通して固定」)。
   速度は曲を開始する前(キャリブレーション画面)でのみ変更できる
 - **ヘッドホン使用を必須とする**(spec.md 2章・4.3節)。BGMをスピーカーで再生すると
@@ -234,6 +301,11 @@ alphaTabの解析結果を判定エンジンが扱いやすい形に写した**�
   有無を検出する信頼できる手段はないため、技術的な強制はできない。キャリブレーション画面
   (4.3節)に「ヘッドホンを接続してください」という案内を常時表示し、マイク音量チェックの
   導線と合わせて注意喚起する運用で担保する
+- `AlphaTabApi`は内部で独自に`AudioContext`を生成し(`WebAudioHelper.createAudioContext()`)、
+  外部からの注入経路は無い。**次回セッション(マイク入力)で、マイク用AudioContextとの共有は
+  実現できない**ことを踏まえて設計する。ただし判定エンジン(7章)は元々「手拍子・アタック音
+  でのレイテンシ計測」によるオフセット較正を前提にしており、クロックの同一性には依存しない
+  ため、致命的な設計破綻ではない
 
 ## 6. 音声解析パイプライン
 

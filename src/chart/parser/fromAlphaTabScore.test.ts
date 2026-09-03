@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import * as alphaTab from '@coderline/alphatab'
 import { ChartImportError, importChartFromBytes } from './fromAlphaTabScore'
 
 // public/samples/practice-phrase.gp は動作確認用に自作したオリジナルの短いフレーズ
@@ -12,12 +13,14 @@ const SAMPLE_PATH = fileURLToPath(
 describe('importChartFromBytes', () => {
   it('parses the bundled sample .gp file into a Chart', () => {
     const bytes = new Uint8Array(readFileSync(SAMPLE_PATH))
-    const { chart } = importChartFromBytes(bytes, 'practice-phrase', 'gp')
+    const { chart, midiFile } = importChartFromBytes(bytes, 'practice-phrase', 'gp')
 
     expect(chart.title).toBe('Practice Phrase')
     expect(chart.artist).toBe('FretRush Dev')
     expect(chart.tuning).toBe('standard-eadgbe')
     expect(chart.notes).toHaveLength(16)
+    // BGM再生(audio/playback/alphaSynthPlayer.ts)がそのまま使えるMidiFileも返すこと
+    expect(midiFile).toBeInstanceOf(alphaTab.midi.MidiFile)
 
     // alphaTexの入力(fret.string、TAB譜慣習の弦番号):
     //   3.3 5.3 3.2 5.2 | 3.1 5.1 3.1 1.1 |

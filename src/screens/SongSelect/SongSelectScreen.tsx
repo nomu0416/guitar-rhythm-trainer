@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Chart } from '../../chart/types'
+import type { Song } from '../../types/song'
 import {
   ChartImportError,
   importChartFromBytes,
@@ -7,10 +7,10 @@ import {
 } from '../../chart/parser/fromAlphaTabScore'
 
 interface SongSelectScreenProps {
-  onChartReady: (chart: Chart) => void
+  onSongReady: (song: Song) => void
 }
 
-export function SongSelectScreen({ onChartReady }: SongSelectScreenProps) {
+export function SongSelectScreen({ onSongReady }: SongSelectScreenProps) {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -29,8 +29,12 @@ export function SongSelectScreen({ onChartReady }: SongSelectScreenProps) {
     setError(null)
     try {
       const buffer = await file.arrayBuffer()
-      const { chart } = importChartFromBytes(new Uint8Array(buffer), file.name, sourceFormat)
-      onChartReady(chart)
+      const { chart, midiFile, tempoSegments, ticksPerQuarter } = importChartFromBytes(
+        new Uint8Array(buffer),
+        file.name,
+        sourceFormat,
+      )
+      onSongReady({ chart, midiFile, tempoSegments, ticksPerQuarter })
     } catch (e) {
       setError(e instanceof ChartImportError ? e.message : `インポートに失敗しました: ${String(e)}`)
     } finally {

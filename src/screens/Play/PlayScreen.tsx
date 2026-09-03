@@ -1,29 +1,62 @@
-import { useEffect, useRef } from 'react'
-import type { Chart } from '../../chart/types'
-import { createManualClock } from '../../audio/playback/manualClock'
+import { useEffect, useRef, useState } from 'react'
+import type { Song } from '../../types/song'
+import type { PlaybackSpeedPercent } from '../../audio/playback/types'
+import { createAlphaSynthPlayer } from '../../audio/playback/alphaSynthPlayer'
+import { createAlphaSynthClock } from '../../audio/playback/alphaSynthClock'
 import { createLaneRenderer } from '../../game/render/laneRenderer'
 
 interface PlayScreenProps {
-  chart: Chart
+  song: Song
+  speedPercent: PlaybackSpeedPercent
   onExit: () => void
 }
 
-export function PlayScreen({ chart, onExit }: PlayScreenProps) {
+const SOUND_FONT_URL = '/soundfont/sonivox.sf2'
+
+export function PlayScreen({ song, speedPercent, onExit }: PlayScreenProps) {
+  const { chart, midiFile, tempoSegments, ticksPerQuarter } = song
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    // design.md 11章: プレイ画面に入る際に描画ループを開始し、離れるときに停止・破棄する
-    const renderer = createLaneRenderer({
-      canvas,
-      chart,
-      clock: createManualClock(),
-    })
-    renderer.start()
-    return () => renderer.stop()
-  }, [chart])
+    let cancelled = false
+    let renderer: ReturnType<typeof createLaneRenderer> | null = null
+    let player: Awaited<ReturnType<typeof createAlphaSynthPlayer>> | null = null
+
+    createAlphaSynthPlayer(SOUND_FONT_URL)
+      .then((p) => {
+        if (cancelled) {
+          p.dispose()
+          return
+        }
+        player = p
+        p.onFinished(() => onExit())
+        p.onReadyForPlayback(() => {
+          if (cancelled) return
+          // design.md 11章: プレイ画面に入る際に描画ループを開始し、離れるときに停止・破棄する
+          renderer = createLaneRenderer({
+            canvas,
+            chart,
+            clock: createAlphaSynthClock(p.synth, tempoSegments, ticksPerQuarter),
+          })
+          renderer.start()
+          p.play()
+        })
+        p.loadSong(midiFile, speedPercent)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(`BGM再生を開始できませんでした: ${String(e)}`)
+      })
+
+    return () => {
+      cancelled = true
+      renderer?.stop()
+      player?.dispose()
+    }
+  }, [chart, midiFile, tempoSegments, ticksPerQuarter, speedPercent, onExit])
 
   return (
     <section style={{ position: 'relative', width: '100%', height: '100svh' }}>
@@ -44,6 +77,9 @@ export function PlayScreen({ chart, onExit }: PlayScreenProps) {
           終了
         </button>
       </div>
+      {error && (
+        <p style={{ position: 'absolute', top: 60, left: 20, color: '#f06c6c' }}>{error}</p>
+      )}
       <canvas ref={canvasRef} width={1280} height={720} style={{ width: '100%', height: '100%' }} />
     </section>
   )

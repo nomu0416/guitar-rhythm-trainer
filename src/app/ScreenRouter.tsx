@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { Chart } from '../chart/types'
+import type { Song } from '../types/song'
+import type { PlaybackSpeedPercent } from '../audio/playback/types'
 import { TitleScreen } from '../screens/Title/TitleScreen'
 import { SongSelectScreen } from '../screens/SongSelect/SongSelectScreen'
 import { CalibrationScreen } from '../screens/Calibration/CalibrationScreen'
@@ -11,7 +12,8 @@ type Screen = 'title' | 'songSelect' | 'calibration' | 'play' | 'result'
 
 export function ScreenRouter() {
   const [screen, setScreen] = useState<Screen>('title')
-  const [chart, setChart] = useState<Chart | null>(null)
+  const [song, setSong] = useState<Song | null>(null)
+  const [speedPercent, setSpeedPercent] = useState<PlaybackSpeedPercent>(100)
 
   switch (screen) {
     case 'title':
@@ -20,8 +22,8 @@ export function ScreenRouter() {
     case 'songSelect':
       return (
         <SongSelectScreen
-          onChartReady={(nextChart) => {
-            setChart(nextChart)
+          onSongReady={(nextSong) => {
+            setSong(nextSong)
             setScreen('calibration')
           }}
         />
@@ -31,14 +33,17 @@ export function ScreenRouter() {
       return (
         <CalibrationScreen
           onBack={() => setScreen('songSelect')}
-          onPlay={() => setScreen('play')}
+          onPlay={(nextSpeedPercent) => {
+            setSpeedPercent(nextSpeedPercent)
+            setScreen('play')
+          }}
         />
       )
 
     case 'play':
-      // calibration経由でのみここに来るため、この時点でchartは必ず設定されている
-      if (!chart) return null
-      return <PlayScreen chart={chart} onExit={() => setScreen('result')} />
+      // calibration経由でのみここに来るため、この時点でsongは必ず設定されている
+      if (!song) return null
+      return <PlayScreen song={song} speedPercent={speedPercent} onExit={() => setScreen('result')} />
 
     case 'result':
       return (

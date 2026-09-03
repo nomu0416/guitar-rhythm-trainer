@@ -3,8 +3,7 @@ export type PlaybackSpeedPercent = number // 50-100 の整数(50%〜100%、5%刻
 
 /**
  * ゲーム全体が参照する単一の時刻源(design.md 5章・7章)。
- * 今回のセッションでは performance.now() ベースの仮実装(manualClock.ts)を使うが、
- * 次回セッションでalphaSynthの再生位置ベースの実装に差し替える想定。
+ * alphaSynthClock.ts が alphaSynth の再生位置(timePosition)ベースで実装する。
  * game/render・game/engine はこのインターフェースにのみ依存し、実装の詳細を知らない。
  */
 export interface GameClock {
