@@ -1,0 +1,13 @@
+// design.md 3章 データモデル(audio/playback/types.ts)に対応
+export type PlaybackSpeedPercent = number // 50-100 の整数(50%〜100%、5%刻みに丸めて記録する。spec.md 6章/10章)
+
+/**
+ * ゲーム全体が参照する単一の時刻源(design.md 5章・7章)。
+ * 今回のセッションでは performance.now() ベースの仮実装(manualClock.ts)を使うが、
+ * 次回セッションでalphaSynthの再生位置ベースの実装に差し替える想定。
+ * game/render・game/engine はこのインターフェースにのみ依存し、実装の詳細を知らない。
+ */
+export interface GameClock {
+  /** 曲頭からの経過時間(ms) */
+  nowMs(): number
+}
