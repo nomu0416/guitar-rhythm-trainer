@@ -51,4 +51,51 @@ describe('importChartFromBytes', () => {
     const bytes = new Uint8Array([1, 2, 3, 4, 5])
     expect(() => importChartFromBytes(bytes, 'broken', 'gp3')).toThrow(ChartImportError)
   })
+
+  it('parses a public-domain melody (Ode to Joy excerpt) with recognizable note names', () => {
+    const path = fileURLToPath(new URL('../../../public/samples/ode-to-joy.gp', import.meta.url))
+    const bytes = new Uint8Array(readFileSync(path))
+    const { chart } = importChartFromBytes(bytes, 'ode-to-joy', 'gp')
+
+    expect(chart.title).toBe('Ode to Joy (excerpt)')
+    expect(chart.notes).toHaveLength(16)
+
+    // E E F G | G F E D | C C D E | E D D D | (1ポジション運指: D線2f=E, D線3f=F, G線開放=G, D線開放=D, A線3f=C)
+    expect(chart.notes.map((n) => ({ string: n.string, fret: n.fret }))).toEqual([
+      { string: 4, fret: 2 },
+      { string: 4, fret: 2 },
+      { string: 4, fret: 3 },
+      { string: 3, fret: 0 },
+      { string: 3, fret: 0 },
+      { string: 4, fret: 3 },
+      { string: 4, fret: 2 },
+      { string: 4, fret: 0 },
+      { string: 5, fret: 3 },
+      { string: 5, fret: 3 },
+      { string: 4, fret: 0 },
+      { string: 4, fret: 2 },
+      { string: 4, fret: 2 },
+      { string: 4, fret: 0 },
+      { string: 4, fret: 0 },
+      { string: 4, fret: 0 },
+    ])
+  })
+
+  it('reflects a mid-song tempo change in timeMs (tempo 80 -> 160)', () => {
+    const path = fileURLToPath(
+      new URL('../../../public/samples/tempo-change-phrase.gp', import.meta.url),
+    )
+    const bytes = new Uint8Array(readFileSync(path))
+    const { chart } = importChartFromBytes(bytes, 'tempo-change', 'gp')
+
+    expect(chart.notes).toHaveLength(8)
+    const timings = chart.notes.map((n) => n.timeMs)
+
+    // 1小節目(80bpm、四分音符間隔750ms) -> 2小節目(160bpm、四分音符間隔375ms)
+    const firstBarGaps = [timings[1] - timings[0], timings[2] - timings[1], timings[3] - timings[2]]
+    const secondBarGaps = [timings[5] - timings[4], timings[6] - timings[5], timings[7] - timings[6]]
+
+    for (const gap of firstBarGaps) expect(gap).toBeCloseTo(750, 0)
+    for (const gap of secondBarGaps) expect(gap).toBeCloseTo(375, 0)
+  })
 })
