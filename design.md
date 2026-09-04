@@ -332,12 +332,42 @@ getUserMedia(audio)
   固定テーブルで済む。spec.md 2章)
 - v1は単音検出のみを対象とするため、YINの結果として最も確からしい基本周波数を1つだけ採用する
   (複数ピークの分離は行わない。spec.md 7章)
-- **AudioContextの共有:** マイク入力用の `AudioContext`(本パイプライン)と、BGM再生で
-  `alphaSynth` が内部的に使う `AudioContext` は同一のものを共有する(`alphaSynth` の
-  初期化時に既存の `AudioContext` を渡せるAPIを利用する)。同じ `AudioContext.currentTime` を
-  基準にすることで、5章の「ゲームクロック」(BGM再生位置)と本パイプラインが検出ピッチに
-  付与するタイムスタンプ `timeSec` を直接比較できるようにする(別々の `AudioContext` になると
-  両者の `currentTime` の原点がズレ、別途オフセット計測が必要になってしまう)
+- **AudioContextについて(実装セッション3で訂正):** 5.3節の通り`AlphaTabApi`が内部で使う
+  `AudioContext`は外部から注入できないため、マイク入力用の`AudioContext`とは**別インスタンスに
+  ならざるを得ない**(本節はここで共有を前提にしていたが誤りだった)。そのため、BGM再生側の
+  ゲームクロック(5章、`synth.tickPosition`基準)と、本パイプラインが検出ピッチに付与する
+  `timeSec`(マイク用`AudioContext.currentTime`基準)は、原点も進み方の基準も異なる2つの
+  独立したクロックになる。この差分は7章の判定エンジンが元々前提としていた「手拍子・アタック音
+  でのレイテンシ計測によるオフセット較正」で吸収する(次セッションで実装)。本パイプラインは
+  `timeSec`をマイク用AudioContext自身の`currentTime`基準で一貫して発行することにのみ
+  責任を持てばよい
+
+### 6.1 実装セッション3で確定した詳細
+
+- ホップサイズ(検出処理を実行する間隔)は512サンプル。`process()`はrender quantum(128サンプル)
+  単位で呼ばれるため、`audio/pitch/ringBuffer.ts`(`FloatRingBuffer`)にサンプルを蓄積し、
+  512サンプル溜まるごとに`detectPitch()`を実行する
+- 音量メーター用にRMSも同時計算し(`audio/pitch/rms.ts`)、結果は
+  `{ timeSec, frequencyHz, confidence, rms }`として`postMessage`する
+- `AudioWorkletProcessor`/`registerProcessor`/`sampleRate`/`currentTime`は`lib.dom.d.ts`に
+  含まれないため、`audio/worklet/audioworklet.d.ts`に最小限のアンビエント宣言を手動で用意した
+  (外部`@types`パッケージは不使用)
+- **Vite dev環境でのAudioWorkletモジュール読み込みの落とし穴**: `new URL('./pitchProcessor.ts?worker&url', ...)`や
+  `?url`サフィックスは「実URLを含むJSモジュール」を返す変換であり、
+  `audioWorklet.addModule()`が要求する生スクリプトにはならない(実際に試して`AudioWorkletNode
+  cannot be created: The node name 'pitch-detector' is not defined`エラーで判明した)。
+  **クエリなしの`new URL('./pitchProcessor.ts', import.meta.url)`が正しい**。この形なら
+  Viteがトランスパイル済みESモジュールとして配信し、内部の`import`(`../pitch/yin.ts`等)も
+  Vite側で解決してくれる
+- マイク音をそのまま出力するとハウリングするため、無音のGainNode(`gain=0`)経由で
+  `audioContext.destination`に接続する(destinationに繋がないとブラウザによっては
+  process()が呼ばれ続けない既知の挙動があるため)
+- **Claude Browserツール環境では`getUserMedia`のマイクアクセスがブロックされることを確認済み**
+  (`NotAllowedError: Permission denied`)。懸念していた通りの状況だったが、
+  `audio/input/syntheticMicStream.ts`(`OscillatorNode`+`MediaStreamAudioDestinationNode`で
+  既知周波数の`MediaStream`を合成する開発用ユーティリティ)経由でパイプライン全体
+  (AudioWorklet起動〜YIN検出〜UI表示)を実マイク無しで検証できた。1弦(329.6Hz)・6弦
+  (82.4Hz)とも誤差0セントで検出
 
 ## 7. 判定エンジン
 
